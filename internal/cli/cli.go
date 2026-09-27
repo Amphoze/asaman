@@ -77,17 +77,28 @@ func runImport(cfgPath string, args []string) int {
 		fmt.Fprintln(os.Stderr, "import-csess:", err)
 		return 1
 	}
-	rep, err := meta.ImportCsess(from, app.Cfg.MetaStore)
+	// Build the set of real session IDs so imported curation can't orphan onto
+	// a key no session has (F4).
+	known := map[string]bool{}
+	if ads, e := app.adapters(); e == nil {
+		for _, ad := range ads {
+			refs, _ := ad.Sessions()
+			for _, r := range refs {
+				known[r.ID] = true
+			}
+		}
+	}
+	rep, err := meta.ImportCsessChecked(from, app.Cfg.MetaStore, known)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "import-csess:", err)
 		return 1
 	}
-	fmt.Printf("import-csess: mapped=%d unmapped=%d\n", rep.Mapped, rep.Unmapped)
+	fmt.Printf("import-csess: mapped=%d unmapped=%d unmatched=%d\n", rep.Mapped, rep.Unmapped, rep.Unmatched)
 	for _, d := range rep.Details {
 		fmt.Println("  !", d)
 	}
-	if rep.Unmapped > 0 {
-		return 1 // unmapped rows block csess deletion
+	if !rep.Clean() {
+		return 1 // unmapped/unmatched rows block csess deletion
 	}
 	return 0
 }
