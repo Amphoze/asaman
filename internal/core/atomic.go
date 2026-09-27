@@ -50,5 +50,25 @@ func AtomicWrite(realPath string, data []byte) error {
 	if fi, err := os.Stat(realPath); err == nil {
 		os.Chmod(tmpName, fi.Mode())
 	}
-	return os.Rename(tmpName, realPath)
+	if err := os.Rename(tmpName, realPath); err != nil {
+		return err
+	}
+	// fsync the parent directory so the rename itself is durable across a crash
+	// (rename gives atomicity/consistency, dir fsync gives durability).
+	return fsyncDir(dir)
+}
+
+// fsyncDir flushes a directory entry to disk. A failure to open/sync the
+// directory is non-fatal for correctness (the file content is already synced),
+// so callers that only need consistency may ignore it; AtomicWrite surfaces it.
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		return err
+	}
+	return nil
 }
