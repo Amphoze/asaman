@@ -3,26 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
-	"syscall"
 )
-
-// WithLock runs fn while holding an exclusive advisory lock on lockPath.
-// CLI, UI, and import share the same lock path to serialize writers.
-func WithLock(lockPath string, fn func() error) error {
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	return fn()
-}
 
 // AtomicWrite writes data to realPath via a temp file in the same directory,
 // fsync, then rename. realPath must be the resolved real file (never a symlink
@@ -58,17 +39,6 @@ func AtomicWrite(realPath string, data []byte) error {
 	return fsyncDir(dir)
 }
 
-// fsyncDir flushes a directory entry to disk. A failure to open/sync the
-// directory is non-fatal for correctness (the file content is already synced),
-// so callers that only need consistency may ignore it; AtomicWrite surfaces it.
-func fsyncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	if err := d.Sync(); err != nil {
-		return err
-	}
-	return nil
-}
+// WithLock and fsyncDir are platform-specific (see atomic_unix.go /
+// atomic_windows.go): POSIX flock + directory fsync on Unix, LockFileEx on
+// Windows where a directory handle cannot be fsync'd.
