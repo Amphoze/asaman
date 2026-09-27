@@ -14,12 +14,12 @@ import (
 
 type fakeAdapter struct{ refs []adapters.SessionRef }
 
-func (f *fakeAdapter) Name() string                  { return "fake" }
+func (f *fakeAdapter) Name() string                             { return "fake" }
 func (f *fakeAdapter) Sessions() ([]adapters.SessionRef, error) { return f.refs, nil }
-func (f *fakeAdapter) TimeLog() []string             { return nil }
-func (f *fakeAdapter) ContextPath() string           { return "" }
-func (f *fakeAdapter) MemoryMode() adapters.MemoryMode { return adapters.ModeNone }
-func (f *fakeAdapter) SyncIndex(string) error        { return nil }
+func (f *fakeAdapter) TimeLog() []string                        { return nil }
+func (f *fakeAdapter) ContextPath() string                      { return "" }
+func (f *fakeAdapter) MemoryMode() adapters.MemoryMode          { return adapters.ModeNone }
+func (f *fakeAdapter) SyncIndex(string) error                   { return nil }
 
 func testServer(t *testing.T, store string) *Server {
 	t.Helper()
@@ -29,7 +29,27 @@ func testServer(t *testing.T, store string) *Server {
 		ID: "claude:x", Agent: "claude", Title: "danger", Kind: "session",
 		Events: []adapters.Event{{Idx: 0, Role: "user", Text: "<script>alert(1)</script>"}},
 	}}}
-	return NewServer(db, []adapters.Adapter{ad}, nil, store, store+".lock")
+	s, err := NewServer(db, []adapters.Adapter{ad}, nil, store, store+".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// F5: unknown field/op is rejected with 400 (not silently folded).
+func TestMetaValidation(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "m.jsonl")
+	s := testServer(t, store)
+	h := s.Handler()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/meta",
+		strings.NewReader(`{"Key":"claude:x","Field":"bogus","Op":"set","Value":"1"}`))
+	req.Header.Set("X-CSRF-Token", s.CSRF())
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid field POST = %d want 400", rec.Code)
+	}
 }
 
 // GATE: loopback bind only.

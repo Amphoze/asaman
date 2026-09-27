@@ -28,10 +28,13 @@ type Server struct {
 	refs      map[string]adapters.SessionRef
 }
 
-// NewServer builds a server and indexes the corpus once.
-func NewServer(db *core.DB, ads []adapters.Adapter, facts []memory.Fact, metaStore, lock string) *Server {
+// NewServer builds a server and indexes the corpus once. It fails closed if a
+// secure CSRF token cannot be generated (never serves a predictable token).
+func NewServer(db *core.DB, ads []adapters.Adapter, facts []memory.Fact, metaStore, lock string) (*Server, error) {
 	buf := make([]byte, 16)
-	rand.Read(buf)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, fmt.Errorf("web: cannot generate CSRF token: %w", err)
+	}
 	s := &Server{db: db, ads: ads, metaStore: metaStore, lock: lock,
 		csrf: hex.EncodeToString(buf), refs: map[string]adapters.SessionRef{}}
 	sessions.Reindex(db, ads, facts)
@@ -42,7 +45,21 @@ func NewServer(db *core.DB, ads []adapters.Adapter, facts []memory.Fact, metaSto
 			}
 		}
 	}
-	return s
+	return s, nil
+}
+
+// validMetaField reports whether a (field, op) pair is an allowed curation
+// mutation. Unknown combinations are rejected (400) rather than silently folded.
+func validMetaField(field, op string) bool {
+	switch field {
+	case "fav":
+		return op == "set"
+	case "note":
+		return op == "set" || op == "clear"
+	case "tag":
+		return op == "add" || op == "remove"
+	}
+	return false
 }
 
 // isLoopback reports whether addr binds only the loopback interface.
@@ -60,7 +77,10 @@ func Serve(addr string, db *core.DB, ads []adapters.Adapter, facts []memory.Fact
 	if !isLoopback(addr) {
 		return fmt.Errorf("web: refusing non-loopback bind %q", addr)
 	}
-	s := NewServer(db, ads, facts, metaStore, lock)
+	s, err := NewServer(db, ads, facts, metaStore, lock)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("asaman observatory on http://%s (csrf ready)\n", addr)
 	return http.ListenAndServe(addr, s.Handler())
 }
@@ -127,6 +147,10 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	var body struct{ Key, Field, Op, Value string }
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if body.Key == "" || !validMetaField(body.Field, body.Op) {
+		http.Error(w, "invalid field/op", http.StatusBadRequest)
 		return
 	}
 	if _, err := meta.Append(s.metaStore, meta.Record{
