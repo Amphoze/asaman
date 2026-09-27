@@ -34,6 +34,18 @@ func SyncIndex(contextFile, block string, markers [2]string, lockPath string) er
 	})
 }
 
+// WriteFileAtomic atomically writes data to path (resolving a symlink target)
+// under the shared lock — used for the generated MEMORY.md stub.
+func WriteFileAtomic(path string, data []byte, lockPath string) error {
+	return core.WithLock(lockPath, func() error {
+		real := path
+		if r, err := resolve(path); err == nil {
+			real = r
+		}
+		return core.AtomicWrite(real, data)
+	})
+}
+
 // resolve follows a symlink (if any) to the real file path.
 func resolve(p string) (string, error) {
 	fi, err := os.Lstat(p)
