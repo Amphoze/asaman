@@ -26,9 +26,9 @@ func newClaude(name string, cfg config.AgentCfg, markers [2]string, lock string)
 	return &claudeAdapter{name: name, cfg: cfg, markers: markers, lock: lock}
 }
 
-func (a *claudeAdapter) Name() string          { return a.name }
-func (a *claudeAdapter) TimeLog() []string     { return a.cfg.TimeLog }
-func (a *claudeAdapter) ContextPath() string   { return a.cfg.ContextFile }
+func (a *claudeAdapter) Name() string           { return a.name }
+func (a *claudeAdapter) TimeLog() []string      { return a.cfg.TimeLog }
+func (a *claudeAdapter) ContextPath() string    { return a.cfg.ContextFile }
 func (a *claudeAdapter) MemoryMode() MemoryMode { return MemoryMode(a.cfg.MemoryMode) }
 
 func (a *claudeAdapter) SyncIndex(index string) error {
@@ -37,35 +37,62 @@ func (a *claudeAdapter) SyncIndex(index string) error {
 
 var dateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}`)
 
-func (a *claudeAdapter) Sessions() ([]SessionRef, error) {
-	var out []SessionRef
-	// Transcripts (skip the sessions.jsonl time-log).
+// Files lists transcript files (skipping the sessions.jsonl time-log) plus
+// archive markdown.
+func (a *claudeAdapter) Files() []string {
+	var out []string
 	for _, g := range a.cfg.Sessions {
 		for _, p := range core.ExpandGlob(g) {
 			if filepath.Base(p) == "sessions.jsonl" {
 				continue
 			}
-			kind := "session"
-			if strings.Contains(p, string(filepath.Separator)+"subagents"+string(filepath.Separator)) {
-				kind = "subagent"
-			}
-			sr := parseClaudeTranscript(p)
-			sr.ID = "claude:" + strings.TrimSuffix(filepath.Base(p), ".jsonl")
-			sr.Agent = "claude"
-			sr.Kind = kind
-			out = append(out, sr)
+			out = append(out, p)
 		}
 	}
-	// Archive markdown → archive:{stem} (matching csess scan_archive).
 	for _, g := range a.cfg.Archive {
-		root := archiveRoot(g)
-		for _, p := range core.ExpandGlob(g) {
-			id, kind := archiveID(root, p)
-			out = append(out, SessionRef{
-				ID: "archive:" + id, Agent: "claude", Kind: kind, Path: p,
-				Title: strings.TrimSuffix(filepath.Base(p), ".md"),
-			})
+		out = append(out, core.ExpandGlob(g)...)
+	}
+	return out
+}
+
+// ParseFile parses one transcript (.jsonl) or archive (.md) file.
+func (a *claudeAdapter) ParseFile(p string) ([]SessionRef, error) {
+	if strings.HasSuffix(p, ".md") {
+		root := filepath.Dir(p)
+		for _, g := range a.cfg.Archive {
+			if r := archiveRoot(g); strings.HasPrefix(p, r) {
+				root = r
+				break
+			}
 		}
+		id, kind := archiveID(root, p)
+		return []SessionRef{{
+			ID: "archive:" + id, Agent: "claude", Kind: kind, Path: p,
+			Title: strings.TrimSuffix(filepath.Base(p), ".md"),
+		}}, nil
+	}
+	if filepath.Base(p) == "sessions.jsonl" {
+		return nil, nil
+	}
+	kind := "session"
+	if strings.Contains(p, string(filepath.Separator)+"subagents"+string(filepath.Separator)) {
+		kind = "subagent"
+	}
+	sr := parseClaudeTranscript(p)
+	sr.ID = "claude:" + strings.TrimSuffix(filepath.Base(p), ".jsonl")
+	sr.Agent = "claude"
+	sr.Kind = kind
+	return []SessionRef{sr}, nil
+}
+
+func (a *claudeAdapter) Sessions() ([]SessionRef, error) {
+	var out []SessionRef
+	for _, p := range a.Files() {
+		refs, err := a.ParseFile(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, refs...)
 	}
 	return out, nil
 }

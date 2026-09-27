@@ -36,6 +36,10 @@ type SessionRef struct {
 type Adapter interface {
 	Name() string
 	Sessions() ([]SessionRef, error)
+	// Files lists this adapter's source files (for incremental reindex).
+	Files() []string
+	// ParseFile parses one source file into zero or more SessionRefs.
+	ParseFile(path string) ([]SessionRef, error)
 	TimeLog() []string
 	ContextPath() string
 	MemoryMode() MemoryMode

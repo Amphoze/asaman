@@ -29,31 +29,47 @@ func newCodex(name string, cfg config.AgentCfg, markers [2]string, lock string) 
 func (a *codexAdapter) Name() string           { return a.name }
 func (a *codexAdapter) TimeLog() []string      { return a.cfg.TimeLog }
 func (a *codexAdapter) ContextPath() string    { return a.cfg.ContextFile }
-func (a *codexAdapter) MemoryMode() MemoryMode  { return MemoryMode(a.cfg.MemoryMode) }
+func (a *codexAdapter) MemoryMode() MemoryMode { return MemoryMode(a.cfg.MemoryMode) }
 func (a *codexAdapter) SyncIndex(index string) error {
 	return contextpkg.SyncIndex(a.cfg.ContextFile, index, a.markers, a.lock)
 }
 
 var uuidRe = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
 
-func (a *codexAdapter) Sessions() ([]SessionRef, error) {
-	titles := a.loadTitles() // uuid → title from session_index (best-effort)
-	var out []SessionRef
+// Files lists Codex rollout transcript files.
+func (a *codexAdapter) Files() []string {
+	var out []string
 	for _, g := range a.cfg.Sessions {
-		for _, p := range core.ExpandGlob(g) {
-			sr := parseCodexTranscript(p)
-			if sr.ID == "" {
-				sr.ID = uuidRe.FindString(filepath.Base(p))
-			}
-			uuid := sr.ID
-			sr.ID = "codex:" + uuid
-			sr.Agent = "codex"
-			sr.Kind = "session"
-			if t, ok := titles[uuid]; ok && t != "" {
-				sr.Title = t
-			}
-			out = append(out, sr)
+		out = append(out, core.ExpandGlob(g)...)
+	}
+	return out
+}
+
+// ParseFile parses one Codex rollout transcript into a SessionRef.
+func (a *codexAdapter) ParseFile(p string) ([]SessionRef, error) {
+	titles := a.loadTitles()
+	sr := parseCodexTranscript(p)
+	if sr.ID == "" {
+		sr.ID = uuidRe.FindString(filepath.Base(p))
+	}
+	uuid := sr.ID
+	sr.ID = "codex:" + uuid
+	sr.Agent = "codex"
+	sr.Kind = "session"
+	if t, ok := titles[uuid]; ok && t != "" {
+		sr.Title = t
+	}
+	return []SessionRef{sr}, nil
+}
+
+func (a *codexAdapter) Sessions() ([]SessionRef, error) {
+	var out []SessionRef
+	for _, p := range a.Files() {
+		refs, err := a.ParseFile(p)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, refs...)
 	}
 	return out, nil
 }

@@ -70,6 +70,7 @@ func (d *DB) InitSchema() error {
 			description TEXT, body TEXT, path TEXT, superseded INT DEFAULT 0);`,
 		`CREATE TABLE IF NOT EXISTS files(
 			path TEXT PRIMARY KEY, sha TEXT, bytes INT, mtime REAL, session_id TEXT);`,
+		`CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, val TEXT);`,
 	}
 	if d.hasFTS {
 		stmts = append(stmts,
@@ -87,6 +88,13 @@ func (d *DB) InitSchema() error {
 		}
 	}
 	return nil
+}
+
+// GetState returns a stored state value (empty string if absent).
+func (d *DB) GetState(key string) string {
+	var v string
+	d.sql.QueryRow(`SELECT val FROM state WHERE key=?`, key).Scan(&v)
+	return v
 }
 
 // TableExists reports whether a table (or virtual table) exists.

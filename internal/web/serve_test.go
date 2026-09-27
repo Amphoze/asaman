@@ -20,6 +20,10 @@ func (f *fakeAdapter) TimeLog() []string                        { return nil }
 func (f *fakeAdapter) ContextPath() string                      { return "" }
 func (f *fakeAdapter) MemoryMode() adapters.MemoryMode          { return adapters.ModeNone }
 func (f *fakeAdapter) SyncIndex(string) error                   { return nil }
+func (f *fakeAdapter) Files() []string                          { return nil }
+func (f *fakeAdapter) ParseFile(string) ([]adapters.SessionRef, error) {
+	return f.refs, nil
+}
 
 func testServer(t *testing.T, store string) *Server {
 	t.Helper()

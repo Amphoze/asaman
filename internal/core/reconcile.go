@@ -61,6 +61,9 @@ func ExpandGlob(pattern string) []string {
 	return out
 }
 
+// FileSHA returns the hex sha256 of a file's contents.
+func FileSHA(path string) (string, error) { return fileSHA(path) }
+
 func fileSHA(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
