@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/amphoze/asaman/internal/context"
@@ -33,6 +34,81 @@ func flagVal(args []string, name string) (val string, present bool, rest []strin
 	return
 }
 
+// guardIndex refuses an index write that would either clobber a canonical file
+// with no marker block, or write through a context_file that is not the
+// symlinked canonical (which would desync the two agents' loaded files).
+// --init bootstraps the marker block; --force overrides both checks.
+func guardIndex(app *App, initFlag, force bool) error {
+	canon := app.Cfg.Canonical
+	if !hasMarkers(canon, app.Cfg.IndexMarkers) {
+		switch {
+		case initFlag:
+			if err := bootstrapMarkers(app); err != nil {
+				return err
+			}
+		case force:
+			// allow: spliceBlock will append a fresh marked section
+		default:
+			return fmt.Errorf("canonical %s has no %s block; run `asaman index --init` to bootstrap (or --force)",
+				canon, app.Cfg.IndexMarkers[0])
+		}
+	}
+	ads, _ := app.adapters()
+	for _, ad := range ads {
+		cf := ad.ContextPath()
+		if cf == "" || cf == canon || force {
+			continue
+		}
+		if !isSymlink(cf) || !sameFile(cf, canon) {
+			return fmt.Errorf("context_file %s is not a symlink to canonical %s (writing would desync both files); fix the symlink or pass --force",
+				cf, canon)
+		}
+	}
+	return nil
+}
+
+// bootstrapMarkers appends an empty marked index section to the canonical file
+// if it has none. Idempotent.
+func bootstrapMarkers(app *App) error {
+	m := app.Cfg.IndexMarkers
+	if hasMarkers(app.Cfg.Canonical, m) {
+		return nil
+	}
+	data, err := os.ReadFile(app.Cfg.Canonical)
+	if err != nil {
+		return err
+	}
+	s := string(data)
+	if s != "" && !strings.HasSuffix(s, "\n") {
+		s += "\n"
+	}
+	s += "\n" + m[0] + "\n" + m[1] + "\n"
+	return context.WriteFileAtomic(app.Cfg.Canonical, []byte(s), app.Lock)
+}
+
+func hasMarkers(path string, m [2]string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	s := string(data)
+	i := strings.Index(s, m[0])
+	j := strings.Index(s, m[1])
+	return i >= 0 && j >= 0 && j >= i
+}
+
+func isSymlink(p string) bool {
+	fi, err := os.Lstat(p)
+	return err == nil && fi.Mode()&os.ModeSymlink != 0
+}
+
+// sameFile reports whether two paths resolve (through symlinks) to one file.
+func sameFile(a, b string) bool {
+	ra, e1 := filepath.EvalSymlinks(a)
+	rb, e2 := filepath.EvalSymlinks(b)
+	return e1 == nil && e2 == nil && ra == rb
+}
+
 // renderIndexBlock loads facts and returns the rendered index text.
 func (a *App) renderIndexBlock() (string, error) {
 	facts, err := a.facts()
@@ -60,12 +136,21 @@ func (a *App) currentBlock() string {
 // runIndex regenerates the index block, MEMORY stub, and rebuilds the cache DB.
 // With --check it only reports staleness (exit 1 if the on-disk block differs).
 func runIndex(cfgPath string, args []string) int {
-	_, check, rest := flagVal(args, "check")
-	_ = rest
+	_, check, a1 := flagVal(args, "check")
+	_, initFlag, a2 := flagVal(a1, "init")
+	_, force, _ := flagVal(a2, "force")
 	app, err := loadApp(cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "index:", err)
 		return 1
+	}
+	// Guard against writes that would clobber a markerless file or desync the
+	// symlinked canonical (F1). --check never writes, so it skips the guard.
+	if !check {
+		if err := guardIndex(app, initFlag, force); err != nil {
+			fmt.Fprintln(os.Stderr, "index:", err)
+			return 1
+		}
 	}
 	block, err := app.renderIndexBlock()
 	if err != nil {
