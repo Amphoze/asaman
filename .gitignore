@@ -1,0 +1,5 @@
+/.gotmp/
+/.superpowers/
+/asaman
+*.test
+/coverage.out

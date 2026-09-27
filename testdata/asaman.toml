@@ -1,0 +1,22 @@
+memory_dir    = "~/Projects/AGENTS/memory"
+canonical     = "~/Projects/AGENTS.md"
+index_markers = ["<!-- asaman:index -->", "<!-- /asaman:index -->"]
+meta_store    = "~/Projects/AGENTS/asaman/meta.jsonl"
+cache_db      = "~/.cache/asaman/index.db"
+
+[agents.claude]
+adapter      = "claude"
+sessions     = ["~/.claude/projects/*/*.jsonl", "~/.claude/projects/*/subagents/*.jsonl"]
+archive      = ["~/Projects/AGENTS/sessions/**/*.md"]
+time_log     = ["~/.claude/projects/*/sessions.jsonl"]
+context_file = "~/Projects/CLAUDE.md"
+memory_dir   = "~/.claude/projects/-home-amphoze-Projects/memory"
+memory_mode  = "native"
+
+[agents.codex]
+adapter      = "codex"
+sessions     = ["~/.codex/sessions/**/*.jsonl"]
+meta         = ["~/.codex/session_index.jsonl", "~/.codex/history.jsonl"]
+time_log     = ["~/.Codex/projects/*/sessions.jsonl"]
+context_file = "~/Projects/AGENTS.md"
+memory_mode  = "inline-index"
