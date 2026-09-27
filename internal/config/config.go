@@ -29,6 +29,7 @@ type Config struct {
 	IndexMarkers [2]string           `toml:"index_markers"`
 	MetaStore    string              `toml:"meta_store"`
 	CacheDB      string              `toml:"cache_db"`
+	IndexDensity string              `toml:"index_density"`
 	Agents       map[string]AgentCfg `toml:"agents"`
 }
 
@@ -66,6 +67,14 @@ func Load(path string) (*Config, error) {
 	c.Canonical = expand(c.Canonical)
 	c.MetaStore = expand(c.MetaStore)
 	c.CacheDB = expand(c.CacheDB)
+	switch c.IndexDensity {
+	case "":
+		c.IndexDensity = "hybrid"
+	case "full", "hybrid", "names":
+		// valid
+	default:
+		return nil, fmt.Errorf("config: invalid index_density %q (want full, hybrid, or names)", c.IndexDensity)
+	}
 	for name, a := range c.Agents {
 		a.Sessions = expandAll(a.Sessions)
 		a.Meta = expandAll(a.Meta)

@@ -17,9 +17,47 @@ func catRank(c string) int {
 	return len(categoryOrder)
 }
 
+// behavioralCategories are rendered with a truncated description "hook" in
+// hybrid density; all other categories render name-only in hybrid.
+var behavioralCategories = map[string]bool{
+	"User":      true,
+	"Feedback":  true,
+	"Incidents": true,
+	"Projects":  true,
+}
+
+// hybridHookRunes is the max rune length of a hybrid-density description hook.
+const hybridHookRunes = 60
+
+// truncateRunes truncates s to at most n runes, appending U+2026 if truncated.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// renderFactLine renders one fact line according to the given density.
+func renderFactLine(f Fact, density string) string {
+	switch density {
+	case "full":
+		return "- **" + f.Name + "** — " + f.Description
+	case "names":
+		return "- " + f.Name
+	default: // hybrid (and any unrecognized density)
+		if behavioralCategories[f.Category] && f.Description != "" {
+			return "- " + f.Name + " — " + truncateRunes(f.Description, hybridHookRunes)
+		}
+		return "- " + f.Name
+	}
+}
+
 // RenderIndex renders the one-line-per-fact index, grouped by category.
 // Superseded facts are excluded; output is deterministic (stable ordering).
-func RenderIndex(facts []Fact) string {
+// density controls per-fact rendering: "full", "names", or "hybrid" (default;
+// unrecognized values are treated as "hybrid").
+func RenderIndex(facts []Fact, density string) string {
 	byCat := map[string][]Fact{}
 	for _, f := range facts {
 		if f.Superseded() {
@@ -47,7 +85,7 @@ func RenderIndex(facts []Fact) string {
 		fs := byCat[c]
 		sort.Slice(fs, func(a, z int) bool { return fs[a].Name < fs[z].Name })
 		for _, f := range fs {
-			b.WriteString("- **" + f.Name + "** — " + f.Description + "\n")
+			b.WriteString(renderFactLine(f, density) + "\n")
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

@@ -16,6 +16,9 @@ func TestLoad(t *testing.T) {
 	if c.IndexMarkers[0] != "<!-- asaman:index -->" || c.IndexMarkers[1] != "<!-- /asaman:index -->" {
 		t.Errorf("markers = %v", c.IndexMarkers)
 	}
+	if c.IndexDensity != "hybrid" {
+		t.Errorf("IndexDensity = %q, want default %q", c.IndexDensity, "hybrid")
+	}
 	wantMem := filepath.Join(home, "Projects/AGENTS/memory")
 	if c.MemoryDir != wantMem {
 		t.Errorf("MemoryDir = %q want %q", c.MemoryDir, wantMem)

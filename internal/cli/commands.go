@@ -115,7 +115,11 @@ func (a *App) renderIndexBlock() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return memory.RenderIndex(facts), nil
+	density := a.Cfg.IndexDensity
+	if density == "" {
+		density = "hybrid"
+	}
+	return memory.RenderIndex(facts, density), nil
 }
 
 // currentBlock extracts the text currently inside the canonical's markers.
