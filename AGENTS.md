@@ -16,3 +16,7 @@ ldflags `-s -w`, CGO off). Test: `make test`.
   categories (User/Feedback/Incidents/Projects) render `- Name — <60-rune hook…>`
   (name-only when desc empty), all other categories render name-only. Unrecognized
   density is treated as `hybrid`.
+
+## 2026-09-27 — Asaman closing verification
+
+- Independently verified T1–T6 context topology and race-enabled Go suite; recorded coordinator fresh Codex T7 proof and two isolated metadata edge failures in `AGENTS/specs/2026-09-27-asaman-closing-tests.md`. Documentation only; no implementation or live-context edits.

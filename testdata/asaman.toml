@@ -10,7 +10,7 @@ sessions     = ["~/.claude/projects/*/*.jsonl", "~/.claude/projects/*/subagents/
 archive      = ["~/Projects/AGENTS/sessions/**/*.md"]
 time_log     = ["~/.claude/projects/*/sessions.jsonl"]
 context_file = "~/Projects/CLAUDE.md"
-memory_dir   = "~/.claude/projects/-home-amphoze-Projects/memory"
+memory_dir   = "~/.claude/projects/-home-user-Projects/memory"
 memory_mode  = "native"
 
 [agents.codex]

@@ -86,7 +86,7 @@ func ImportCsessChecked(csessDB, store string, known map[string]bool) (Report, e
 				return rep, err
 			}
 		}
-		if strings.TrimSpace(note) != "" {
+		if note != "" /* exact bytes; whitespace-only note is a real value, TrimSpace would drop it */ {
 			if _, err := Append(store, Record{Actor: "import", Key: key, Field: "note", Op: "set", Value: note}); err != nil {
 				return rep, err
 			}

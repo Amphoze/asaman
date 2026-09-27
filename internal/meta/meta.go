@@ -33,6 +33,30 @@ type Curation struct {
 
 func lockPath(store string) string { return store + ".lock" }
 
+// quarantineTail durably appends a partial (crash) tail to the .corrupt sidecar.
+// It returns an error if the bytes cannot be written and fsync'd, so the caller
+// can refuse to truncate the original store.
+func quarantineTail(path string, partial []byte) error {
+	cf, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	buf := append(append([]byte{}, partial...), '\n')
+	for len(buf) > 0 {
+		n, werr := cf.Write(buf)
+		if werr != nil {
+			cf.Close()
+			return werr
+		}
+		buf = buf[n:]
+	}
+	if serr := cf.Sync(); serr != nil { // durable before we destroy the source
+		cf.Close()
+		return serr
+	}
+	return cf.Close()
+}
+
 // readValid returns the valid whole-line records and the byte offset of the
 // end of the last complete line. Any bytes after that offset are an incomplete
 // (crash) tail.
@@ -67,14 +91,12 @@ func Append(store string, r Record) (int64, error) {
 			return err
 		}
 		recs, goodEnd := readValid(data)
-		// Repair-before-append: quarantine + truncate any partial tail.
+		// Repair-before-append: durably quarantine the partial tail BEFORE
+		// truncating it. If quarantine fails, do not truncate — losing the
+		// crash tail while acknowledging the append would be silent data loss.
 		if goodEnd < len(data) {
-			partial := data[goodEnd:]
-			cf, e := os.OpenFile(store+".corrupt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-			if e == nil {
-				cf.Write(partial)
-				cf.Write([]byte("\n"))
-				cf.Close()
+			if err := quarantineTail(store+".corrupt", data[goodEnd:]); err != nil {
+				return err
 			}
 			if e := os.Truncate(store, int64(goodEnd)); e != nil {
 				return e
