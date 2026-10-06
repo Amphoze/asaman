@@ -58,6 +58,15 @@ func (d *DB) Close() error { return d.sql.Close() }
 // InitSchema creates all derived tables. The full-text surface is FTS5 when
 // available, else a portable tokenized `terms` table with the same query API.
 func (d *DB) InitSchema() error {
+	// The cache is rebuildable: when the derived layout changes, drop it and
+	// let the next reindex repopulate from source.
+	if d.TableExists("state") && d.GetState("schema_ver") != schemaVer {
+		for _, t := range []string{"sessions", "events", "memory", "files", "state", "fts", "terms"} {
+			if _, err := d.sql.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
+				return fmt.Errorf("schema reset: %w", err)
+			}
+		}
+	}
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS sessions(
 			id TEXT PRIMARY KEY, agent TEXT, title TEXT, started TEXT,
@@ -75,13 +84,14 @@ func (d *DB) InitSchema() error {
 	if d.hasFTS {
 		stmts = append(stmts,
 			`CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
-				id UNINDEXED, agent UNINDEXED, kind UNINDEXED, title, text);`)
+				id UNINDEXED, agent UNINDEXED, kind UNINDEXED, title, text, aux);`)
 	} else {
 		stmts = append(stmts,
 			`CREATE TABLE IF NOT EXISTS terms(
-				id TEXT, agent TEXT, kind TEXT, title TEXT, text TEXT);`,
+				id TEXT, agent TEXT, kind TEXT, title TEXT, text TEXT, aux TEXT);`,
 			`CREATE INDEX IF NOT EXISTS ix_terms_id ON terms(id);`)
 	}
+	stmts = append(stmts, `INSERT OR REPLACE INTO state(key,val) VALUES('schema_ver','`+schemaVer+`');`)
 	for _, s := range stmts {
 		if _, err := d.sql.Exec(s); err != nil {
 			return fmt.Errorf("schema: %w", err)
@@ -89,6 +99,10 @@ func (d *DB) InitSchema() error {
 	}
 	return nil
 }
+
+// schemaVer identifies the derived-table layout and the indexing rules that
+// fill it. Bump it whenever either changes so stale caches rebuild.
+const schemaVer = "4"
 
 // GetState returns a stored state value (empty string if absent).
 func (d *DB) GetState(key string) string {

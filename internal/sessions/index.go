@@ -114,7 +114,7 @@ func Reindex(db *core.DB, ads []adapters.Adapter, facts []memory.Fact) error {
 	if err != nil {
 		return err
 	}
-	insFts, err := tx.Prepare(`INSERT INTO ` + ftsTable + `(id,agent,kind,title,text) VALUES(?,?,?,?,?)`)
+	insFts, err := tx.Prepare(`INSERT INTO ` + ftsTable + `(id,agent,kind,title,text,aux) VALUES(?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -137,15 +137,25 @@ func Reindex(db *core.DB, ads []adapters.Adapter, facts []memory.Fact) error {
 			if _, err := insSess.Exec(r.ID, r.Agent, r.Title, r.Started, r.Path, r.Kind, r.Activity); err != nil {
 				return err
 			}
-			var sb strings.Builder
+			// Searchable text is split by provenance: what people and agents
+			// wrote (text) ranks above tool output and compaction summaries
+			// (aux); injected context is not searchable at all.
+			var prose, aux strings.Builder
 			for _, e := range r.Events {
 				if _, err := insEvt.Exec(r.ID, e.Idx, e.Role, e.Ts, e.Text); err != nil {
 					return err
 				}
-				sb.WriteString(e.Text)
-				sb.WriteByte('\n')
+				switch e.Role {
+				case adapters.RoleContext:
+				case "user", "assistant", adapters.RoleArchive:
+					prose.WriteString(e.Text)
+					prose.WriteByte('\n')
+				default:
+					aux.WriteString(e.Text)
+					aux.WriteByte('\n')
+				}
 			}
-			if _, err := insFts.Exec(r.ID, r.Agent, r.Kind, r.Title, sb.String()); err != nil {
+			if _, err := insFts.Exec(r.ID, r.Agent, r.Kind, r.Title, prose.String(), aux.String()); err != nil {
 				return err
 			}
 			lastSid = r.ID
@@ -177,7 +187,7 @@ func Reindex(db *core.DB, ads []adapters.Adapter, facts []memory.Fact) error {
 			if _, err := insMem.Exec(f.Name, f.Type, f.Category, f.Description, f.Body, f.Path, sup); err != nil {
 				return err
 			}
-			if _, err := insFts.Exec(f.Name, "memory", "memory", f.Description, f.Body); err != nil {
+			if _, err := insFts.Exec(f.Name, "memory", "memory", f.Name+" — "+f.Description, f.Body, ""); err != nil {
 				return err
 			}
 		}

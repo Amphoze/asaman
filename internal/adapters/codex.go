@@ -55,7 +55,9 @@ func (a *codexAdapter) ParseFile(p string) ([]SessionRef, error) {
 	uuid := sr.ID
 	sr.ID = "codex:" + uuid
 	sr.Agent = "codex"
-	sr.Kind = "session"
+	if sr.Kind == "" {
+		sr.Kind = "session"
+	}
 	if t, ok := titles[uuid]; ok && t != "" {
 		sr.Title = t
 	}
@@ -94,7 +96,7 @@ func (a *codexAdapter) loadTitles() map[string]string {
 					continue
 				}
 				id := uuidRe.FindString(str(m["id"]) + " " + str(m["session_id"]) + " " + str(m["path"]))
-				title := firstNonEmpty(str(m["title"]), str(m["preview"]), str(m["summary"]))
+				title := firstNonEmpty(str(m["thread_name"]), str(m["title"]), str(m["preview"]), str(m["summary"]))
 				if id != "" && title != "" {
 					titles[id] = title
 				}
@@ -121,6 +123,11 @@ func parseCodexTranscript(path string) SessionRef {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1024*1024), 32*1024*1024)
 	idx := 0
+	guardian := false
+	// The filename carries this rollout's own thread id. A forked subagent's
+	// file also replays its parent's session_meta, which must not be taken as
+	// its identity.
+	own := uuidRe.FindString(filepath.Base(path))
 	for sc.Scan() {
 		var l codexLine
 		if json.Unmarshal(sc.Bytes(), &l) != nil {
@@ -132,23 +139,40 @@ func parseCodexTranscript(path string) SessionRef {
 		switch l.Type {
 		case "session_meta":
 			var p struct {
-				SessionID string `json:"session_id"`
-				ID        string `json:"id"`
+				SessionID    string `json:"session_id"`
+				ID           string `json:"id"`
+				Parent       string `json:"parent_thread_id"`
+				ThreadSource string `json:"thread_source"`
 			}
-			if json.Unmarshal(l.Payload, &p) == nil {
-				if id := firstNonEmpty(p.SessionID, p.ID); id != "" {
+			if json.Unmarshal(l.Payload, &p) == nil && (own == "" || uuidRe.FindString(p.ID) == own) {
+				// `id` is this rollout's own thread; `session_id` is the root
+				// thread and is shared by every subagent it spawned, so keying
+				// on it would make subagents overwrite their parent.
+				if id := firstNonEmpty(p.ID, p.SessionID); id != "" {
 					sr.ID = uuidRe.FindString(id)
 				}
+				if p.Parent != "" {
+					sr.Kind = "subagent"
+				}
+				// A guardian review replays its parent's history to judge one
+				// action; indexing it would duplicate the parent.
+				guardian = p.ThreadSource == "guardian_review"
 			}
 		case "response_item":
 			role, text := codexItem(l.Payload)
+			switch {
+			case guardian || role == "developer" || role == "system" || IsContext(text):
+				role = RoleContext
+			case role == "user" || role == "assistant":
+				text = StripInjected(text)
+			}
 			if text == "" {
 				continue
 			}
 			sr.Events = append(sr.Events, Event{Idx: idx, Role: role, Ts: l.Timestamp, Text: text})
 			idx++
 			if sr.Title == "" && role == "user" {
-				sr.Title = firstLine(text)
+				sr.Title = titleLine(text)
 			}
 		}
 	}

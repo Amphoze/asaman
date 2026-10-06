@@ -66,10 +66,19 @@ func (a *claudeAdapter) ParseFile(p string) ([]SessionRef, error) {
 			}
 		}
 		id, kind := archiveID(root, p)
-		return []SessionRef{{
+		sr := SessionRef{
 			ID: "archive:" + id, Agent: "claude", Kind: kind, Path: p,
-			Title: strings.TrimSuffix(filepath.Base(p), ".md"),
-		}}, nil
+			Title:   strings.TrimSuffix(filepath.Base(p), ".md"),
+			Started: dateRe.FindString(filepath.Base(p)),
+		}
+		// Index the note body: the archive is the only record of old sessions.
+		if b, err := os.ReadFile(p); err == nil {
+			if body := strings.TrimSpace(string(b)); body != "" {
+				sr.Events = []Event{{Role: RoleArchive, Ts: sr.Started, Text: body}}
+				sr.Activity = 1
+			}
+		}
+		return []SessionRef{sr}, nil
 	}
 	if filepath.Base(p) == "sessions.jsonl" {
 		return nil, nil
@@ -132,6 +141,8 @@ type claudeLine struct {
 	Timestamp string          `json:"timestamp"`
 	Summary   string          `json:"summary"`
 	Message   json.RawMessage `json:"message"`
+	IsMeta    bool            `json:"isMeta"`
+	IsCompact bool            `json:"isCompactSummary"`
 }
 
 type claudeMsg struct {
@@ -164,8 +175,12 @@ func parseClaudeTranscript(path string) SessionRef {
 		if len(l.Message) > 0 {
 			var m claudeMsg
 			if json.Unmarshal(l.Message, &m) == nil {
+				var toolOnly bool
+				text, toolOnly = extractText(m.Content)
 				role = m.Role
-				text = extractText(m.Content)
+				if toolOnly {
+					role = "tool_result" // tool output arrives under the user role
+				}
 			}
 		}
 		if role == "" {
@@ -174,13 +189,21 @@ func parseClaudeTranscript(path string) SessionRef {
 		if text == "" && l.Summary != "" {
 			text = l.Summary
 		}
+		switch {
+		case l.IsMeta || IsContext(text):
+			role = RoleContext
+		case l.IsCompact:
+			role = RoleSummary
+		default:
+			text = StripInjected(text)
+		}
 		if text == "" {
 			continue
 		}
 		sr.Events = append(sr.Events, Event{Idx: idx, Role: role, Ts: l.Timestamp, Text: text})
 		idx++
 		if sr.Title == "" && role == "user" {
-			sr.Title = firstLine(text)
+			sr.Title = titleLine(text)
 		}
 	}
 	sr.Activity = len(sr.Events)
@@ -191,42 +214,48 @@ func parseClaudeTranscript(path string) SessionRef {
 }
 
 // extractText pulls plain text + tool names/results from Claude content, which
-// is either a string or an array of typed blocks.
-func extractText(raw json.RawMessage) string {
+// is either a string or an array of typed blocks. toolOnly is true when the
+// content carried tool results and no prose.
+func extractText(raw json.RawMessage) (text string, toolOnly bool) {
 	if len(raw) == 0 {
-		return ""
+		return "", false
 	}
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
-		return s
+		return s, false
 	}
 	var blocks []map[string]any
 	if json.Unmarshal(raw, &blocks) != nil {
-		return ""
+		return "", false
 	}
 	var parts []string
+	prose, results := 0, 0
 	for _, b := range blocks {
 		switch b["type"] {
 		case "text":
 			if t, ok := b["text"].(string); ok {
 				parts = append(parts, t)
+				prose++
 			}
 		case "tool_use":
 			if n, ok := b["name"].(string); ok {
 				parts = append(parts, "[tool:"+n+"]")
 			}
 		case "tool_result":
-			if c, ok := b["content"].(string); ok {
+			results++
+			switch c := b["content"].(type) {
+			case string:
 				parts = append(parts, c)
+			case []any:
+				for _, it := range c {
+					if m, ok := it.(map[string]any); ok {
+						if t, ok := m["text"].(string); ok {
+							parts = append(parts, t)
+						}
+					}
+				}
 			}
 		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
+	return strings.TrimSpace(strings.Join(parts, "\n")), results > 0 && prose == 0
 }

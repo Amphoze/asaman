@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/amphoze/asaman/internal/context"
@@ -208,6 +209,10 @@ func runIndex(cfgPath string, args []string) int {
 func runSearch(cfgPath string, args []string, o sessions.Opts) int {
 	agent, _, rest := flagVal(args, "agent")
 	o.Agent = agent
+	limit, _, rest := flagVal(rest, "limit")
+	if n, err := strconv.Atoi(limit); err == nil {
+		o.Limit = n
+	}
 	q := strings.Join(rest, " ")
 	app, err := loadApp(cfgPath)
 	if err != nil {
@@ -229,7 +234,26 @@ func runSearch(cfgPath string, args []string, o sessions.Opts) int {
 		return 1
 	}
 	for _, h := range hits {
-		fmt.Printf("%-8s %-9s %s\n    %s\n", h.Kind, h.Agent, h.Title, oneLine(h.Snippet))
+		when := truncate(h.Started, 10)
+		if when == "" {
+			when = "-"
+		}
+		fmt.Printf("%-10s %-8s %-7s %s\n", when, h.Kind, h.Agent, truncate(oneLine(h.Title), 90))
+		fmt.Printf("    %s\n", oneLine(h.Snippet))
+		ref := h.ID
+		if h.Path != "" {
+			ref = h.Path
+		}
+		if h.Loose {
+			ref += "  (loose: terms far apart)"
+		}
+		if h.Similar > 0 {
+			ref += fmt.Sprintf("  (+%d more with the same text)", h.Similar)
+		}
+		fmt.Printf("    %s\n", ref)
+	}
+	if len(hits) == 0 {
+		fmt.Println("no matches")
 	}
 	return 0
 }
